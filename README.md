@@ -109,6 +109,51 @@ roborock-cli raw get_network_info
 roborock-cli raw set_custom_mode '[102]'
 ```
 
+## 🤖 Telegram Bot
+
+Control your vacuum with inline buttons directly in Telegram!
+
+### Setup
+
+1. Create a bot via [@BotFather](https://t.me/BotFather) on Telegram
+2. Copy the bot token
+3. Run:
+
+```bash
+roborock-cli bot --token YOUR_BOT_TOKEN
+```
+
+### Restrict access (recommended)
+
+Only allow specific Telegram users to control the vacuum:
+
+```bash
+roborock-cli bot --token YOUR_BOT_TOKEN --users 123456789,987654321
+```
+
+Find your Telegram user ID by messaging [@userinfobot](https://t.me/userinfobot).
+
+### Using environment variables
+
+```bash
+export TELEGRAM_BOT_TOKEN=your_token_here
+roborock-cli bot
+```
+
+### Control Panel
+
+Send `/panel` to your bot to get an interactive control panel:
+
+```
+🤖 Roborock S8 | 🔋 92% | 💤 Idle | 💨 Max
+
+[▶️ Start]  [⏸ Pause]  [⏹ Stop]
+[🏠 Dock]   [📍 Find]  [🔄 Status]
+[🔇 Quiet]  [⚖️ Balanced] [💨 Turbo]
+```
+
+The panel auto-updates after each action — battery, state, and fan speed refresh in real-time.
+
 ## 🔐 Security
 
 - Credentials are stored in `~/.config/roborock-cli/config.json` with `600` permissions (only you can read)

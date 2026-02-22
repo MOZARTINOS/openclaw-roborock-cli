@@ -82,6 +82,32 @@ def setup_interactive():
     print(f"\n🎉 Done! Try: roborock-cli status")
 
 
+def run_bot(args):
+    """Start the Telegram bot."""
+    import os
+
+    token = args.token or os.environ.get("TELEGRAM_BOT_TOKEN")
+    if not token:
+        print("❌ Telegram bot token required.")
+        print("   Use --token or set TELEGRAM_BOT_TOKEN environment variable.")
+        print("   Create a bot via @BotFather on Telegram.")
+        sys.exit(1)
+
+    try:
+        config = load_config()
+    except FileNotFoundError as e:
+        print(f"❌ {e}")
+        sys.exit(1)
+
+    allowed_users = None
+    if args.users:
+        allowed_users = [int(uid.strip()) for uid in args.users.split(",")]
+        print(f"🔒 Restricted to user IDs: {allowed_users}")
+
+    from .telegram_bot import start_bot
+    start_bot(token, config, allowed_users)
+
+
 def run_command(args):
     """Execute a vacuum command."""
     try:
@@ -149,6 +175,11 @@ def main():
     raw_parser.add_argument("method", help="Command method name")
     raw_parser.add_argument("params", nargs="?", help="JSON params")
 
+    # Telegram bot
+    bot_parser = subparsers.add_parser("bot", help="Start Telegram bot with control panel")
+    bot_parser.add_argument("--token", help="Telegram bot token (or set TELEGRAM_BOT_TOKEN env)")
+    bot_parser.add_argument("--users", help="Comma-separated allowed Telegram user IDs (optional)")
+
     args = parser.parse_args()
 
     if args.verbose:
@@ -162,6 +193,8 @@ def main():
 
     if args.command == "setup":
         setup_interactive()
+    elif args.command == "bot":
+        run_bot(args)
     else:
         run_command(args)
 
