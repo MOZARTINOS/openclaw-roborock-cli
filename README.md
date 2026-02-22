@@ -1,6 +1,6 @@
 # OpenClaw Roborock CLI
 
-[![CI](https://github.com/MOZARTINOS/OpenClaw-Roborock/actions/workflows/ci.yml/badge.svg)](https://github.com/MOZARTINOS/OpenClaw-Roborock/actions/workflows/ci.yml)
+[![CI](https://github.com/MOZARTINOS/openclaw-roborock-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/MOZARTINOS/openclaw-roborock-cli/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 
@@ -24,6 +24,15 @@ It connects to Roborock Cloud MQTT and supports terminal control, Telegram bot c
 - Telegram bot control panel (optional dependency).
 - Camera snapshot/record/MJPEG stream on camera models (optional dependency).
 - Android ADB extraction stage via built-in `adb-setup`.
+
+## Requirements
+
+- Python `3.10+`
+- A Roborock account with at least one device
+- For standard setup: email code access
+- For Telegram features: install extras `roborock-cloud-cli[telegram]`
+- For camera features: install extras `roborock-cloud-cli[camera]`
+- For ADB fallback: Android phone with USB debugging + `adb`
 
 ## Installation
 
@@ -54,8 +63,8 @@ pip install roborock-cloud-cli[all]
 From source:
 
 ```bash
-git clone https://github.com/MOZARTINOS/OpenClaw-Roborock.git
-cd OpenClaw-Roborock
+git clone https://github.com/MOZARTINOS/openclaw-roborock-cli.git
+cd openclaw-roborock-cli
 pip install -e .
 ```
 
@@ -164,6 +173,9 @@ MJPEG endpoints:
 
 Camera guide: `docs/CAMERA.md`
 
+Known camera limitation:
+- Standard Roborock S8 has no user-accessible camera; use camera commands only on camera-equipped models.
+
 ## Command Reference
 
 | Command | Description |
@@ -218,6 +230,11 @@ pytest
 ```
 
 Contribution guidelines: `CONTRIBUTING.md`
+
+## Support
+
+- Issues: `https://github.com/MOZARTINOS/openclaw-roborock-cli/issues`
+- Discussions: `https://github.com/MOZARTINOS/openclaw-roborock-cli/discussions`
 
 ## License
 

@@ -47,8 +47,8 @@ all = ["python-telegram-bot>=21.0", "aiortc>=1.9.0", "av>=12.0.0"]
 dev = ["pytest>=8.0", "pytest-cov>=5.0"]
 
 [project.urls]
-Homepage = "https://github.com/MOZARTINOS/OpenClaw-Roborock"
-Issues = "https://github.com/MOZARTINOS/OpenClaw-Roborock/issues"
+Homepage = "https://github.com/MOZARTINOS/openclaw-roborock-cli"
+Issues = "https://github.com/MOZARTINOS/openclaw-roborock-cli/issues"
 
 [project.scripts]
 roborock-cli = "roborock_cli.cli:main"
