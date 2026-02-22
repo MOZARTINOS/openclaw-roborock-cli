@@ -108,6 +108,49 @@ def run_bot(args):
     start_bot(token, config, allowed_users)
 
 
+def run_camera(args):
+    """Run camera commands (snapshot, record, stream)."""
+    try:
+        config = load_config()
+    except FileNotFoundError as e:
+        print(f"❌ {e}")
+        sys.exit(1)
+
+    from .camera import camera_snapshot, camera_record, camera_stream
+
+    try:
+        if args.command == "snapshot":
+            print(f"📸 Taking snapshot...")
+            path = asyncio.run(camera_snapshot(
+                config, output=args.output, password=args.password,
+                quality=args.quality, device_index=args.device,
+            ))
+            print(f"✅ Saved: {path}")
+
+        elif args.command == "record":
+            print(f"🎬 Recording {args.duration}s video...")
+            path = asyncio.run(camera_record(
+                config, output=args.output, duration=args.duration,
+                password=args.password, quality=args.quality,
+                device_index=args.device,
+            ))
+            print(f"✅ Saved: {path}")
+
+        elif args.command == "stream":
+            print(f"🎥 Starting camera stream...")
+            asyncio.run(camera_stream(
+                config, host=args.host, port=args.port,
+                password=args.password, quality=args.quality,
+                device_index=args.device,
+            ))
+
+    except RuntimeError as e:
+        print(f"❌ {e}")
+        sys.exit(1)
+    except KeyboardInterrupt:
+        print("\n⏹ Stopped")
+
+
 def run_command(args):
     """Execute a vacuum command."""
     try:
@@ -180,6 +223,24 @@ def main():
     bot_parser.add_argument("--token", help="Telegram bot token (or set TELEGRAM_BOT_TOKEN env)")
     bot_parser.add_argument("--users", help="Comma-separated allowed Telegram user IDs (optional)")
 
+    # Camera commands
+    snap_parser = subparsers.add_parser("snapshot", help="📸 Take a camera snapshot (camera models only)")
+    snap_parser.add_argument("-o", "--output", default="snapshot.jpg", help="Output file (default: snapshot.jpg)")
+    snap_parser.add_argument("--password", default="", help="Camera pattern password")
+    snap_parser.add_argument("--quality", default="HD", choices=["HD", "SD"], help="Video quality")
+
+    rec_parser = subparsers.add_parser("record", help="🎬 Record camera video (camera models only)")
+    rec_parser.add_argument("-o", "--output", default="recording.mp4", help="Output file (default: recording.mp4)")
+    rec_parser.add_argument("--duration", type=int, default=30, help="Duration in seconds (default: 30)")
+    rec_parser.add_argument("--password", default="", help="Camera pattern password")
+    rec_parser.add_argument("--quality", default="HD", choices=["HD", "SD"], help="Video quality")
+
+    stream_parser = subparsers.add_parser("stream", help="🎥 Start MJPEG camera stream (camera models only)")
+    stream_parser.add_argument("--host", default="0.0.0.0", help="Bind address (default: 0.0.0.0)")
+    stream_parser.add_argument("--port", type=int, default=8554, help="Port (default: 8554)")
+    stream_parser.add_argument("--password", default="", help="Camera pattern password")
+    stream_parser.add_argument("--quality", default="HD", choices=["HD", "SD"], help="Video quality")
+
     args = parser.parse_args()
 
     if args.verbose:
@@ -195,6 +256,8 @@ def main():
         setup_interactive()
     elif args.command == "bot":
         run_bot(args)
+    elif args.command in ("snapshot", "record", "stream"):
+        run_camera(args)
     else:
         run_command(args)
 

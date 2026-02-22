@@ -31,6 +31,7 @@ $ roborock-cli start
 - 📊 **Status monitoring** — battery, state, clean area, consumables
 - 🏠 **Multi-device** — supports multiple vacuums on one account
 - 🔧 **Raw commands** — send any Roborock command directly
+- 📸 **Camera** — snapshot, record, MJPEG livestream (camera models)
 - 📱 **ADB fallback** — extract credentials via Android Debug Bridge if needed
 
 ## 🚀 Quick Start
@@ -153,6 +154,31 @@ Send `/panel` to your bot to get an interactive control panel:
 ```
 
 The panel auto-updates after each action — battery, state, and fan speed refresh in real-time.
+
+## 📸 Camera Livestream (Beta)
+
+For camera-equipped models (S8 MaxV, Qrevo, etc.) — stream live video!
+
+```bash
+# Install camera dependencies
+pip install roborock-cloud-cli[camera]
+
+# Take a snapshot
+roborock-cli snapshot -o photo.jpg
+
+# Record 30s video
+roborock-cli record --duration 30
+
+# Start live MJPEG stream (open http://localhost:8554 in browser)
+roborock-cli stream
+```
+
+Works with **VLC, OBS, Home Assistant, Frigate**, or any MJPEG-compatible viewer.
+
+👉 See [docs/CAMERA.md](docs/CAMERA.md) for full guide, supported models, and streaming setup.
+
+> ⚠️ **Beta**: Camera support is based on reverse-engineered protocol documentation. 
+> Tested on Qrevo Curv. Please report compatibility with other models!
 
 ## 🔐 Security
 

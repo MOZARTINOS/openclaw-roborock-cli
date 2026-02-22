@@ -106,15 +106,19 @@ async def execute_command(config: dict, cmd_name: str, device_index: int = 0) ->
 class RoborockBot:
     """Telegram bot for Roborock vacuum control."""
 
-    def __init__(self, token: str, config: dict, allowed_users: list[int] | None = None):
+    def __init__(self, token: str, config: dict, allowed_users: list[int] | None = None,
+                 camera_password: str = ""):
         self.config = config
         self.allowed_users = allowed_users
         self.app = Application.builder().token(token).build()
+
+        self.camera_password = camera_password or ""
 
         # Register handlers
         self.app.add_handler(CommandHandler("start", self.cmd_start))
         self.app.add_handler(CommandHandler("panel", self.cmd_panel))
         self.app.add_handler(CommandHandler("status", self.cmd_status))
+        self.app.add_handler(CommandHandler("snapshot", self.cmd_snapshot))
         self.app.add_handler(CallbackQueryHandler(self.on_callback, pattern=r"^rr:"))
 
     def _is_authorized(self, user_id: int) -> bool:
@@ -133,10 +137,33 @@ class RoborockBot:
             "🤖 *Roborock Cloud CLI*\n\n"
             "Commands:\n"
             "/panel — Control panel with buttons\n"
-            "/status — Detailed status\n\n"
+            "/status — Detailed status\n"
+            "/snapshot — 📸 Camera snapshot (camera models)\n\n"
             "Or just use the panel buttons!",
             parse_mode="Markdown",
         )
+
+    async def cmd_snapshot(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Take a camera snapshot and send as photo."""
+        if not self._is_authorized(update.effective_user.id):
+            await update.message.reply_text("⛔ Unauthorized")
+            return
+
+        await update.message.reply_text("📸 Capturing snapshot...")
+        try:
+            from .camera import camera_snapshot
+            import tempfile
+            import os
+
+            with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
+                tmp_path = f.name
+
+            await camera_snapshot(self.config, output=tmp_path, password=self.camera_password)
+            with open(tmp_path, "rb") as photo:
+                await update.message.reply_photo(photo=photo, caption="📸 Roborock Camera")
+            os.unlink(tmp_path)
+        except Exception as e:
+            await update.message.reply_text(f"❌ Snapshot failed: {e}")
 
     async def cmd_panel(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Send the control panel with inline buttons."""
@@ -205,7 +232,8 @@ class RoborockBot:
         self.app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
-def start_bot(telegram_token: str, config: dict, allowed_users: list[int] | None = None):
+def start_bot(telegram_token: str, config: dict, allowed_users: list[int] | None = None,
+              camera_password: str = ""):
     """Start the Telegram bot."""
-    bot = RoborockBot(telegram_token, config, allowed_users)
+    bot = RoborockBot(telegram_token, config, allowed_users, camera_password)
     bot.run()
