@@ -1,0 +1,21 @@
+{
+  "email": "your-roborock-email@example.com",
+  "rriot": {
+    "u": "",
+    "s": "",
+    "h": "",
+    "k": "",
+    "r": {
+      "r": "EU",
+      "a": "",
+      "m": "",
+      "l": ""
+    }
+  },
+  "device": {
+    "duid": "",
+    "name": "",
+    "local_key": "",
+    "product_id": ""
+  }
+}
