@@ -12,10 +12,14 @@
       "l": ""
     }
   },
-  "device": {
-    "duid": "",
-    "name": "",
-    "local_key": "",
-    "product_id": ""
-  }
+  "devices": [
+    {
+      "duid": "",
+      "name": "",
+      "local_key": "",
+      "product_id": "",
+      "model": "",
+      "online": false
+    }
+  ]
 }
