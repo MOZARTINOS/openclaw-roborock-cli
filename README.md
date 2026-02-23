@@ -68,6 +68,13 @@ cd openclaw-roborock-cli
 pip install -e .
 ```
 
+Download without Git:
+1. Open `https://github.com/MOZARTINOS/openclaw-roborock-cli`
+2. Click `Code` -> `Download ZIP`
+3. Extract the ZIP, open the folder in terminal, run `pip install -e .`
+
+Stable releases: `https://github.com/MOZARTINOS/openclaw-roborock-cli/releases`
+
 ## Setup
 
 Standard setup:
@@ -230,6 +237,8 @@ pytest
 ```
 
 Contribution guidelines: `CONTRIBUTING.md`
+Code of conduct: `CODE_OF_CONDUCT.md`
+Security policy: `SECURITY.md`
 
 ## Support
 
