@@ -3,6 +3,13 @@ config.json
 credentials.json
 .env
 
+# ADB extraction artifacts (contain secrets)
+roborock_log*.txt
+roborock_extracted.json
+roborock*.ab
+Controll_panel*.png
+Gemini_Generated_Image*.png
+
 # Python
 __pycache__/
 *.py[cod]
@@ -11,6 +18,10 @@ __pycache__/
 dist/
 build/
 *.egg
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 
 # Virtual environments
 venv/

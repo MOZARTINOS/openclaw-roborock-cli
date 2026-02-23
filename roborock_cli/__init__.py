@@ -1,3 +1,3 @@
-"""Roborock Cloud CLI — control your vacuum from the terminal."""
+"""Roborock Cloud CLI package."""
 
-__version__ = "0.2.0"
+__version__ = "0.4.0"

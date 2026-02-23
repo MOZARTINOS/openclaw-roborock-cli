@@ -323,7 +323,7 @@ class RoborockCamera:
         logger.info("Recording saved: %s", output_path)
         return output_path
 
-    async def stream_mjpeg(self, host: str = "0.0.0.0", port: int = 8554) -> None:
+    async def stream_mjpeg(self, host: str = "127.0.0.1", port: int = 8554) -> None:
         """Start an MJPEG HTTP stream server for browser/VLC viewing.
 
         View at: http://localhost:8554/stream
@@ -452,7 +452,7 @@ async def camera_record(config: dict, output: str = "recording.mp4",
         await camera.disconnect()
 
 
-async def camera_stream(config: dict, host: str = "0.0.0.0", port: int = 8554,
+async def camera_stream(config: dict, host: str = "127.0.0.1", port: int = 8554,
                         password: str = "", quality: str = "HD",
                         device_index: int = 0) -> None:
     """Convenience function: connect and start MJPEG stream server."""

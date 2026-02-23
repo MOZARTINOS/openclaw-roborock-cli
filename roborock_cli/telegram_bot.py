@@ -1,139 +1,136 @@
 """Telegram bot with inline button control panel for Roborock."""
 
+from __future__ import annotations
+
 import asyncio
 import logging
-import signal
-import sys
+import os
+import tempfile
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes
 
 from .commands import COMMANDS, FAN_SPEED_MAP, STATE_MAP, format_status
-from .config import load_config
 from .mqtt import send_command
-from .rooms import clean_rooms, discover_rooms, load_room_map
+from .rooms import clean_rooms, discover_rooms, load_room_map, save_room_map
 
 logger = logging.getLogger(__name__)
 
-# State emoji mapping
-STATE_EMOJI = {
-    1: "🔄", 2: "💤", 3: "💤", 5: "🧹", 6: "🏠", 7: "🕹",
-    8: "🔋", 9: "⚠️", 10: "⏸", 11: "🎯", 12: "❌", 13: "📴",
-    14: "📥", 15: "🏠", 16: "🎯", 17: "🧹", 18: "🧹",
-    22: "🗑", 23: "🚿", 26: "🚿", 100: "✅",
+STATE_ICON = {
+    1: "STARTING",
+    2: "IDLE",
+    3: "IDLE",
+    5: "CLEANING",
+    6: "DOCKING",
+    8: "CHARGING",
+    10: "PAUSED",
+    12: "ERROR",
+    17: "ZONED",
+    18: "ROOM",
 }
 
-FAN_EMOJI = {101: "🔇", 102: "⚖️", 103: "💨", 104: "🌪"}
-
-# Room emoji mapping (customize per room name)
-ROOM_EMOJI = {
-    "kitchen": "🍳", "кухня": "🍳",
-    "dining": "🍽", "столовая": "🍽", "dining room": "🍽",
-    "living": "🛋", "гостиная": "🛋", "living room": "🛋",
-    "bedroom": "🛏", "спальня": "🛏", "master bedroom": "🛏",
-    "kids": "🧒", "детская": "🧒", "kids room": "🧒", "nursery": "🧒",
-    "office": "💻", "кабинет": "💻", "study": "💻",
-    "hallway": "🚪", "коридор": "🚪", "corridor": "🚪", "hall": "🚪",
-    "bathroom": "🚿", "ванная": "🚿",
+ROOM_ICON_HINTS = {
+    "kitchen": "Kitchen",
+    "dining": "Dining",
+    "living": "Living",
+    "bedroom": "Bedroom",
+    "kids": "Kids",
+    "office": "Office",
+    "hallway": "Hallway",
+    "bathroom": "Bathroom",
 }
 
 
-def _room_emoji(name: str) -> str:
-    """Get emoji for a room name."""
-    lower = name.lower()
-    for key, emoji in ROOM_EMOJI.items():
-        if key in lower:
-            return emoji
-    return "🏠"
+def _room_label(name: str) -> str:
+    lowered = name.lower()
+    for hint, label in ROOM_ICON_HINTS.items():
+        if hint in lowered:
+            return f"{label}: {name}"
+    return name
 
 
 def build_keyboard(room_map: dict[int, str] | None = None) -> InlineKeyboardMarkup:
-    """Build the inline keyboard with controls and optional room buttons."""
+    """Build inline control panel keyboard."""
     rows = [
-        # Control row
         [
-            InlineKeyboardButton("▶️  Start", callback_data="rr:start"),
-            InlineKeyboardButton("⏸  Pause", callback_data="rr:pause"),
-            InlineKeyboardButton("⏹  Stop", callback_data="rr:stop"),
+            InlineKeyboardButton("Start", callback_data="rr:start"),
+            InlineKeyboardButton("Pause", callback_data="rr:pause"),
+            InlineKeyboardButton("Stop", callback_data="rr:stop"),
         ],
         [
-            InlineKeyboardButton("🏠  Dock", callback_data="rr:dock"),
-            InlineKeyboardButton("📍  Find", callback_data="rr:find"),
-            InlineKeyboardButton("📊  Status", callback_data="rr:status"),
+            InlineKeyboardButton("Dock", callback_data="rr:dock"),
+            InlineKeyboardButton("Find", callback_data="rr:find"),
+            InlineKeyboardButton("Status", callback_data="rr:status"),
         ],
-        # Fan speed row
         [
-            InlineKeyboardButton("🔇  Quiet", callback_data="rr:fan_quiet"),
-            InlineKeyboardButton("⚖️  Balanced", callback_data="rr:fan_balanced"),
-            InlineKeyboardButton("💨  Turbo", callback_data="rr:fan_turbo"),
+            InlineKeyboardButton("Quiet", callback_data="rr:fan_quiet"),
+            InlineKeyboardButton("Balanced", callback_data="rr:fan_balanced"),
+            InlineKeyboardButton("Turbo", callback_data="rr:fan_turbo"),
         ],
     ]
 
-    # Add room buttons if available
     if room_map:
-        rows.append([InlineKeyboardButton("── Rooms ──", callback_data="rr:noop")])
-
-        room_buttons = []
-        for sid, name in sorted(room_map.items()):
-            emoji = _room_emoji(name)
-            room_buttons.append(
-                InlineKeyboardButton(f"{emoji}  {name}", callback_data=f"rr:room:{sid}")
-            )
-
-        # Layout: 3 buttons per row
-        for i in range(0, len(room_buttons), 3):
-            rows.append(room_buttons[i:i + 3])
-
-        # "All Rooms" button
-        rows.append([InlineKeyboardButton("🏠  All Rooms", callback_data="rr:start")])
+        rows.append([InlineKeyboardButton("Rooms", callback_data="rr:noop")])
+        room_buttons = [
+            InlineKeyboardButton(_room_label(name), callback_data=f"rr:room:{segment_id}")
+            for segment_id, name in sorted(room_map.items())
+        ]
+        for index in range(0, len(room_buttons), 2):
+            rows.append(room_buttons[index : index + 2])
+        rows.append([InlineKeyboardButton("All Rooms", callback_data="rr:start")])
 
     return InlineKeyboardMarkup(rows)
 
 
 def format_panel_header(status_data: list | dict) -> str:
-    """Format a compact status header for the control panel."""
-    if isinstance(status_data, list) and len(status_data) > 0:
+    """Format compact status text for the panel."""
+    if isinstance(status_data, list) and status_data:
         status_data = status_data[0]
     if not isinstance(status_data, dict):
-        return "🤖 *Roborock*\n\n❓ Status unknown"
+        return "Roborock\nStatus: unknown"
 
     state = status_data.get("state", -1)
     battery = status_data.get("battery", -1)
     fan = status_data.get("fan_power", -1)
     error = status_data.get("error_code", 0)
 
-    state_emoji = STATE_EMOJI.get(state, "❓")
-    state_name = STATE_MAP.get(state, "Unknown")
-    fan_name = FAN_SPEED_MAP.get(fan, "Custom")
-    fan_icon = FAN_EMOJI.get(fan, "🔧")
+    state_name = STATE_MAP.get(state, f"Unknown({state})")
+    state_icon = STATE_ICON.get(state, state_name.upper())
+    fan_name = FAN_SPEED_MAP.get(fan, f"Custom({fan})")
 
-    header = f"🤖 *Roborock*\n\n{state_emoji} {state_name}  ·  🔋 {battery}%  ·  {fan_icon} {fan_name}"
-
-    if error:
-        header += f"\n⚠️ Error: {error}"
+    lines = [
+        "Roborock",
+        f"State:   {state_icon}",
+        f"Battery: {battery}%",
+        f"Fan:     {fan_name}",
+    ]
 
     clean_area = status_data.get("clean_area", 0)
     clean_time = status_data.get("clean_time", 0)
     if status_data.get("in_cleaning") or state in (5, 11, 17, 18):
-        header += f"\n🧹 {clean_area / 1000000:.1f} m²  ·  ⏱ {clean_time // 60}m {clean_time % 60}s"
+        lines.append(f"Cleaned: {clean_area / 1000000:.1f} m^2 in {clean_time // 60}m {clean_time % 60}s")
 
-    return header
+    if error:
+        lines.append(f"Error: {error}")
+
+    return "\n".join(lines)
 
 
 async def get_status_text(config: dict, device_index: int = 0) -> str:
-    """Get formatted status from the vacuum."""
+    """Fetch and format current robot status."""
     try:
         from roborock.roborock_typing import RoborockCommand
+
         result = await send_command(config, RoborockCommand.GET_STATUS, device_index=device_index)
         return format_panel_header(result)
-    except Exception as e:
-        return f"🤖 *Roborock*\n\n❌ Error: {e}"
+    except Exception as error:  # noqa: BLE001
+        return f"Roborock\nError: {error}"
 
 
 async def execute_command(config: dict, cmd_name: str, device_index: int = 0) -> str:
-    """Execute a command and return result text."""
+    """Run a command and return summary text."""
     if cmd_name not in COMMANDS:
-        return f"❌ Unknown: {cmd_name}"
+        return f"Unknown command: {cmd_name}"
 
     method, params, description = COMMANDS[cmd_name]
     try:
@@ -141,24 +138,28 @@ async def execute_command(config: dict, cmd_name: str, device_index: int = 0) ->
         if cmd_name == "status":
             return format_panel_header(result)
         if result == ["ok"]:
-            return f"✅ {description}"
+            return f"OK: {description}"
         return str(result)
-    except Exception as e:
-        return f"❌ {description} failed: {e}"
+    except Exception as error:  # noqa: BLE001
+        return f"Failed: {description}: {error}"
 
 
 class RoborockBot:
     """Telegram bot for Roborock vacuum control with room support."""
 
-    def __init__(self, token: str, config: dict, allowed_users: list[int] | None = None,
-                 camera_password: str = ""):
+    def __init__(
+        self,
+        token: str,
+        config: dict,
+        allowed_users: list[int] | None = None,
+        camera_password: str = "",
+    ) -> None:
         self.config = config
         self.allowed_users = allowed_users
         self.room_map: dict[int, str] = load_room_map(config)
-        self.app = Application.builder().token(token).build()
         self.camera_password = camera_password or ""
+        self.app = Application.builder().token(token).build()
 
-        # Register handlers
         self.app.add_handler(CommandHandler("start", self.cmd_start))
         self.app.add_handler(CommandHandler("panel", self.cmd_panel))
         self.app.add_handler(CommandHandler("status", self.cmd_status))
@@ -167,152 +168,150 @@ class RoborockBot:
         self.app.add_handler(CallbackQueryHandler(self.on_callback, pattern=r"^rr:"))
 
     def _is_authorized(self, user_id: int) -> bool:
-        """Check if user is authorized."""
         if self.allowed_users is None:
             return True
         return user_id in self.allowed_users
 
-    async def cmd_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /start command."""
+    async def cmd_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not update.effective_user or not update.effective_message:
+            return
         if not self._is_authorized(update.effective_user.id):
-            await update.message.reply_text("⛔ Unauthorized")
+            await update.effective_message.reply_text("Unauthorized")
             return
 
-        rooms_str = ""
-        if self.room_map:
-            rooms_str = f"\n/rooms — Refresh room list ({len(self.room_map)} rooms)"
+        lines = [
+            "Roborock Cloud CLI Bot",
+            "",
+            "/panel - control panel",
+            "/status - detailed status",
+            "/rooms - discover room list",
+            "/snapshot - camera snapshot (camera models)",
+        ]
+        await update.effective_message.reply_text("\n".join(lines))
 
-        await update.message.reply_text(
-            "🤖 *Roborock Cloud CLI*\n\n"
-            "Commands:\n"
-            "/panel — Control panel with buttons\n"
-            "/status — Detailed status\n"
-            f"{rooms_str}\n"
-            "/snapshot — 📸 Camera snapshot (camera models)\n\n"
-            "Or just use the panel buttons!",
-            parse_mode="Markdown",
-        )
-
-    async def cmd_rooms(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Discover and list rooms."""
+    async def cmd_rooms(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not update.effective_user or not update.effective_message:
+            return
         if not self._is_authorized(update.effective_user.id):
-            await update.message.reply_text("⛔ Unauthorized")
+            await update.effective_message.reply_text("Unauthorized")
             return
 
-        await update.message.reply_text("🗺 Discovering rooms...")
+        await update.effective_message.reply_text("Discovering rooms...")
         try:
             self.room_map = await discover_rooms(self.config)
-            lines = [f"🏠 *{len(self.room_map)} rooms found:*\n"]
-            for sid, name in sorted(self.room_map.items()):
-                emoji = _room_emoji(name)
-                lines.append(f"  {emoji} {name} `[{sid}]`")
-            lines.append("\nUse /panel to see room buttons!")
-            await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
-        except Exception as e:
-            await update.message.reply_text(f"❌ Room discovery failed: {e}")
+            save_room_map(self.room_map)
+            if not self.room_map:
+                await update.effective_message.reply_text("No rooms discovered.")
+                return
 
-    async def cmd_snapshot(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Take a camera snapshot and send as photo."""
+            lines = [f"Rooms discovered: {len(self.room_map)}"]
+            for segment_id, name in sorted(self.room_map.items()):
+                lines.append(f"- [{segment_id}] {name}")
+            await update.effective_message.reply_text("\n".join(lines))
+        except Exception as error:  # noqa: BLE001
+            await update.effective_message.reply_text(f"Room discovery failed: {error}")
+
+    async def cmd_snapshot(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not update.effective_user or not update.effective_message:
+            return
         if not self._is_authorized(update.effective_user.id):
-            await update.message.reply_text("⛔ Unauthorized")
+            await update.effective_message.reply_text("Unauthorized")
             return
 
-        await update.message.reply_text("📸 Capturing snapshot...")
+        await update.effective_message.reply_text("Capturing snapshot...")
+        temp_path: str | None = None
         try:
             from .camera import camera_snapshot
-            import tempfile
-            import os
 
-            with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
-                tmp_path = f.name
+            with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as temp_file:
+                temp_path = temp_file.name
 
-            await camera_snapshot(self.config, output=tmp_path, password=self.camera_password)
-            with open(tmp_path, "rb") as photo:
-                await update.message.reply_photo(photo=photo, caption="📸 Roborock Camera")
-            os.unlink(tmp_path)
-        except Exception as e:
-            await update.message.reply_text(f"❌ Snapshot failed: {e}")
+            await camera_snapshot(self.config, output=temp_path, password=self.camera_password)
+            with open(temp_path, "rb") as photo:
+                await update.effective_message.reply_photo(photo=photo, caption="Roborock camera")
+        except Exception as error:  # noqa: BLE001
+            await update.effective_message.reply_text(f"Snapshot failed: {error}")
+        finally:
+            if temp_path:
+                try:
+                    os.unlink(temp_path)
+                except OSError:
+                    pass
 
-    async def cmd_panel(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Send the control panel with inline buttons."""
+    async def cmd_panel(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not update.effective_user or not update.effective_message:
+            return
         if not self._is_authorized(update.effective_user.id):
-            await update.message.reply_text("⛔ Unauthorized")
+            await update.effective_message.reply_text("Unauthorized")
             return
 
         status_text = await get_status_text(self.config)
-        await update.message.reply_text(
+        await update.effective_message.reply_text(
             status_text,
             reply_markup=build_keyboard(self.room_map),
-            parse_mode="Markdown",
         )
 
-    async def cmd_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Send detailed status."""
+    async def cmd_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not update.effective_user or not update.effective_message:
+            return
         if not self._is_authorized(update.effective_user.id):
-            await update.message.reply_text("⛔ Unauthorized")
+            await update.effective_message.reply_text("Unauthorized")
             return
 
         try:
             from roborock.roborock_typing import RoborockCommand
+
             result = await send_command(self.config, RoborockCommand.GET_STATUS)
             text = format_status(result)
-            await update.message.reply_text(f"```\n{text}\n```", parse_mode="Markdown")
-        except Exception as e:
-            await update.message.reply_text(f"❌ Error: {e}")
+            await update.effective_message.reply_text(text)
+        except Exception as error:  # noqa: BLE001
+            await update.effective_message.reply_text(f"Error: {error}")
 
-    async def on_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle inline button presses."""
+    async def on_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query
+        if not query:
+            return
         if not self._is_authorized(query.from_user.id):
-            await query.answer("⛔ Unauthorized", show_alert=True)
+            await query.answer("Unauthorized", show_alert=True)
             return
 
         data = query.data.replace("rr:", "")
-
-        # Ignore separator button
         if data == "noop":
             await query.answer()
             return
 
-        # Room cleaning: rr:room:16
         if data.startswith("room:"):
             segment_id = int(data.split(":")[1])
             room_name = self.room_map.get(segment_id, f"Room {segment_id}")
-            await query.answer(f"🧹 Cleaning {room_name}...")
-
+            await query.answer(f"Cleaning {room_name}...")
             try:
                 await clean_rooms(self.config, [segment_id])
-                # Refresh status after a moment
                 await asyncio.sleep(2)
                 status_text = await get_status_text(self.config)
-            except Exception as e:
-                status_text = f"🤖 *Roborock*\n\n❌ Failed to clean {room_name}: {e}"
+            except Exception as error:  # noqa: BLE001
+                status_text = f"Failed to clean {room_name}: {error}"
 
             try:
                 await query.edit_message_text(
                     status_text,
                     reply_markup=build_keyboard(self.room_map),
-                    parse_mode="Markdown",
                 )
             except Exception:
                 pass
             return
 
-        # Standard commands
-        cmd_name = data
-        await query.answer(f"⏳ {cmd_name}...")
+        command_name = data
+        await query.answer(f"Running {command_name}...")
 
-        result_text = await execute_command(self.config, cmd_name)
-
-        if cmd_name == "find":
-            await query.answer("📍 Beeping!", show_alert=True)
+        if command_name == "find":
+            _ = await execute_command(self.config, command_name)
+            await query.answer("Robot is beeping.", show_alert=True)
             return
 
-        # Update the panel message with new status
-        if cmd_name == "status":
-            status_text = result_text
+        if command_name == "status":
+            status_text = await execute_command(self.config, command_name)
         else:
-            # After any command, refresh status
+            _ = await execute_command(self.config, command_name)
             await asyncio.sleep(2)
             status_text = await get_status_text(self.config)
 
@@ -320,24 +319,23 @@ class RoborockBot:
             await query.edit_message_text(
                 status_text,
                 reply_markup=build_keyboard(self.room_map),
-                parse_mode="Markdown",
             )
         except Exception:
-            # Message unchanged — ignore
             pass
 
-    def run(self):
-        """Start the bot (blocking)."""
-        print("🤖 Roborock Telegram Bot started! Press Ctrl+C to stop.")
+    def run(self) -> None:
+        print("Roborock Telegram Bot started. Press Ctrl+C to stop.")
         if self.room_map:
-            print(f"🏠 {len(self.room_map)} rooms loaded")
-        else:
-            print("💡 No rooms cached — use /rooms in Telegram to discover")
+            print(f"Loaded {len(self.room_map)} cached room(s).")
         self.app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
-def start_bot(telegram_token: str, config: dict, allowed_users: list[int] | None = None,
-              camera_password: str = ""):
-    """Start the Telegram bot."""
+def start_bot(
+    telegram_token: str,
+    config: dict,
+    allowed_users: list[int] | None = None,
+    camera_password: str = "",
+) -> None:
+    """Start bot process."""
     bot = RoborockBot(telegram_token, config, allowed_users, camera_password)
     bot.run()

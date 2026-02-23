@@ -1,42 +1,56 @@
 # Changelog
 
-## [0.2.0] — 2026-02-23
+## [0.4.0] - 2026-02-23
 
 ### Added
-- **Room cleaning** — clean specific rooms by name (`roborock-cli clean Kitchen`)
-- **Room discovery** — auto-discover rooms from cloud + device mapping (`roborock-cli rooms`)
-- **Partial name matching** — `clean kit` matches "Kitchen"
-- **Multi-room cleaning** — `clean Kitchen Bedroom Office` in one command
-- **Repeat passes** — `clean Kitchen --repeat 2` for deep cleaning
-- **Telegram room buttons** — control panel now includes room-specific clean buttons
-- `/rooms` Telegram command — refresh room list from cloud
-- Room names auto-fetched from Roborock app via cloud API (Hawk auth)
-- `rooms.py` module — room resolution, caching, segment cleaning
-- `rooms` and `maps` commands in CLI
-- Room emoji auto-detection based on room name
+
+- Unified project positioning as both:
+  - standalone CLI
+  - OpenClaw-compatible agent skill backend
+- Room workflow:
+  - `rooms` discovery command
+  - `clean <room...>` by name with `--repeat`
+- `docs/OPENCLAW_SKILL.md` integration guide
+- Test coverage for room mapping/resolution (`tests/test_rooms.py`)
 
 ### Changed
-- Setup now auto-discovers rooms and saves segment mapping
-- Telegram bot panel includes "── Rooms ──" separator with room buttons
-- Config format extended with `rooms` (cloud IDs → names) and `room_segments` (segment IDs → names)
-- Auth module now uses Hawk authentication for cloud API (room/home data)
-- Version bumped to 0.2.0
 
-### Fixed
-- Improved `get_home_data` to use correct IoT endpoint for home ID discovery
+- Rebuilt `cli.py` with merged feature set:
+  - `setup`, `adb-setup`, `devices`, room workflows, raw commands
+  - JSON output support across major flows
+  - Optional dependency handling for Telegram and camera extras
+- Camera stream defaults now bind to `127.0.0.1` for safer local exposure
+- Documentation refreshed for public/open-source clarity and security
+- Packaging metadata updated to `0.4.0`
 
-## [0.1.0] — 2026-02-22
+### Security and Repo Hygiene
+
+- Removed internal-only `BRIEF.md` from tracked files
+- Restored OSS community/security files:
+  - `CONTRIBUTING.md`
+  - `CODE_OF_CONDUCT.md`
+  - `SECURITY.md`
+  - PR template and issue templates
+- Expanded ignore rules for sensitive/local artifacts
+
+## [0.3.0] - 2026-02-23
 
 ### Added
-- Initial release
-- Cloud authentication via email verification code
-- MQTT control: start, stop, pause, dock, find, fan speed
-- Status monitoring with human-readable output
-- Consumable tracking
-- Multi-device support
-- Raw command mode
-- Interactive setup wizard
-- Telegram bot with inline button control panel
-- Camera support (snapshot, record, MJPEG stream) — beta
-- ADB credential extraction guide
-- Protocol documentation
+
+- CLI stabilization for public release
+- ADB extraction helpers and command integration
+- Camera beta command set
+- CI and initial test suite
+
+## [0.2.0] - 2026-02-23
+
+### Added
+
+- Room-specific cleaning (initial implementation)
+- Telegram room buttons
+
+## [0.1.0] - 2026-02-22
+
+### Added
+
+- Initial public CLI implementation

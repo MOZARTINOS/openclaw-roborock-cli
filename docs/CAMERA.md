@@ -1,184 +1,107 @@
-# Camera Livestream Guide
+# Camera Guide (Beta)
 
-Stream live video from your Roborock vacuum's camera to a browser, VLC, file, or Telegram.
+Use this guide for Roborock models with a user-accessible camera.
 
-## Supported Models
+Disclaimer:
+- Camera support is beta.
+- Behavior can vary by model, region, firmware, and app version.
+- Community testing is welcome. Please report model, firmware, command, and redacted logs.
 
-Camera streaming requires a vacuum with a **user-accessible camera**:
+## Supported Scope
 
-| Model | Camera | Livestream |
-|-------|--------|------------|
-| S8 MaxV Ultra | ✅ | ✅ Supported |
-| S8 Pro Ultra | ✅ | ✅ Supported |
-| Qrevo MaxV | ✅ | ✅ Supported |
-| Qrevo Curv | ✅ | ✅ Tested |
-| Qrevo S | ✅ | ✅ Supported |
-| **S8 (standard)** | ❌ | ❌ No camera |
-| S7 / S6 series | ❌ | ❌ No camera |
-| E / Q series | ❌ | ❌ No camera |
+Camera commands are intended for camera-capable variants (for example MaxV/Qrevo camera models).
 
-> **Note:** The standard Roborock S8 has an infrared obstacle sensor, NOT a user-accessible camera.
+Known limitation:
+- Standard Roborock S8 does not provide a user-accessible camera feed.
 
-## Installation
-
-Camera features require extra dependencies:
+## Install Camera Dependencies
 
 ```bash
 pip install roborock-cloud-cli[camera]
+```
 
-# Or install everything:
+Or all extras:
+
+```bash
 pip install roborock-cloud-cli[all]
 ```
 
-## Camera Pattern Password
+## Camera Password
 
-Your vacuum may require a **pattern password** for camera access. This is the numeric pattern you set in the Roborock app under:
+If your model requires a camera pattern password, pass it with `--password`.
 
-**Settings → Home Security → Pattern Password**
+Examples:
 
-Common patterns: `1234`, `0000`, `9876`, etc.
-
-If you haven't set a pattern password, try without `--password` first.
+```bash
+roborock-cli snapshot --password 1234
+roborock-cli record --password 1234 --duration 30
+```
 
 ## Commands
 
-### 📸 Snapshot
-
-Take a single photo:
+Snapshot:
 
 ```bash
-roborock-cli snapshot
-roborock-cli snapshot -o kitchen.jpg
-roborock-cli snapshot --password 1234 --quality HD
+roborock-cli snapshot -o photo.jpg
 ```
 
-### 🎬 Record Video
-
-Record video to MP4:
+Record video:
 
 ```bash
-roborock-cli record
-roborock-cli record --duration 60 -o cleaning.mp4
-roborock-cli record --password 1234 --quality SD
+roborock-cli record --duration 30 -o clip.mp4
 ```
 
-### 🎥 Live Stream (MJPEG)
-
-Start an HTTP stream server:
+Start MJPEG stream (safe local default):
 
 ```bash
-roborock-cli stream
-roborock-cli stream --port 9000
+roborock-cli stream --host 127.0.0.1 --port 8554
+```
+
+Stream URLs:
+
+- Browser: `http://127.0.0.1:8554/`
+- MJPEG: `http://127.0.0.1:8554/stream`
+
+LAN sharing (only if required):
+
+```bash
 roborock-cli stream --host 0.0.0.0 --port 8554
 ```
 
-Then open in browser or VLC:
-- **Browser:** `http://localhost:8554/`
-- **VLC:** `http://localhost:8554/stream`
-- **OBS:** Add Browser source → `http://localhost:8554/`
+## Telegram Snapshot
 
-### 📱 Telegram Snapshot
+If bot mode is active:
 
-If running the Telegram bot:
-
-```
+```text
 /snapshot
-```
-
-The bot will capture a frame and send it as a photo.
-
-## Streaming to External Services
-
-### OBS Studio
-1. Start the MJPEG stream: `roborock-cli stream`
-2. In OBS: Add Source → Browser → URL: `http://localhost:8554/`
-
-### YouTube / Twitch (via FFmpeg)
-```bash
-# Start MJPEG stream first
-roborock-cli stream --port 8554 &
-
-# Then pipe to RTMP
-ffmpeg -i http://localhost:8554/stream -c:v libx264 -preset ultrafast \
-  -f flv rtmp://live.twitch.tv/app/YOUR_STREAM_KEY
-```
-
-### Home Assistant
-Use the MJPEG camera integration:
-```yaml
-camera:
-  - platform: mjpeg
-    name: Roborock Camera
-    mjpeg_url: http://YOUR_IP:8554/stream
-```
-
-### Frigate / NVR
-Add as a generic camera source:
-```
-http://YOUR_IP:8554/stream
 ```
 
 ## Troubleshooting
 
-### "Failed to start camera preview"
-- **Close the Roborock app** on your phone first (only one session at a time)
-- Your model may not have a camera (see supported models above)
-- Try with `--password` if you have a pattern set
+`Failed to start camera preview`:
+- close Roborock app on phone (single active session limit)
+- verify model supports camera preview
+- retry with correct `--password` if set
 
-### "Camera password authentication failed"
-- Wrong pattern password — check in Roborock app → Home Security
-- Too many failed attempts may temporarily lock camera access
+`Camera password authentication failed`:
+- verify app pattern password
+- wait and retry if too many attempts were made
 
-### "WebRTC connection failed"
-- Check your firewall allows outbound UDP traffic
-- TURN server relay should handle NAT, but strict firewalls may block it
-- Try `--quality SD` for lower bandwidth requirements
+`WebRTC connection failed`:
+- check outbound network/firewall rules
+- try lower quality (`--quality SD`)
 
-### Poor video quality
-- Use `--quality HD` for better resolution
-- MJPEG has compression artifacts; direct WebRTC (via the Python API) gives better quality
-- Network latency affects stream smoothness
+Poor video quality:
+- use `--quality HD`
+- expect compression artifacts in MJPEG mode
 
-## Python API
+## Protocol Notes
 
-For programmatic access:
+Camera signaling uses WebRTC + MQTT commands:
 
-```python
-import asyncio
-from roborock_cli.camera import RoborockCamera, CameraConfig
-from roborock_cli.config import load_config
+- `start_camera_preview`
+- `get_turn_server`
+- `send_sdp_to_robot` / `get_device_sdp`
+- `send_ice_to_robot` / `get_device_ice`
 
-async def main():
-    config = load_config()
-    camera = RoborockCamera(config, CameraConfig(
-        pattern_password="1234",
-        quality="HD",
-    ))
-
-    await camera.connect()
-
-    # Take a snapshot
-    await camera.snapshot("photo.jpg")
-
-    # Or record video
-    await camera.record("video.mp4", duration=30)
-
-    # Or start MJPEG stream
-    # await camera.stream_mjpeg(port=8554)
-
-    await camera.disconnect()
-
-asyncio.run(main())
-```
-
-## Technical Details
-
-The camera uses **WebRTC** with **MQTT-based signaling**:
-
-1. `start_camera_preview` → initiates camera session
-2. `get_turn_server` → TURN relay credentials for NAT traversal
-3. `send_sdp_to_robot` / `get_device_sdp` → SDP offer/answer exchange
-4. `send_ice_to_robot` / `get_device_ice` → ICE candidate exchange
-5. WebRTC peer connection established → video + audio tracks
-
-See [PROTOCOL.md](PROTOCOL.md) and the [python-roborock camera PR](https://github.com/Python-roborock/python-roborock/pull/764) for full protocol documentation.
+See also: `docs/PROTOCOL.md`
