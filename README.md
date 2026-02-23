@@ -32,7 +32,8 @@ It is designed for people who want scriptable terminal control and agent automat
 This repository is not the OpenClaw core itself.  
 It is an OpenClaw-compatible Roborock skill backend that can also run standalone as a normal CLI.
 
-OpenClaw integration guide: `docs/OPENCLAW_SKILL.md`
+Agent instruction file (used directly by agents): `SKILL.md`  
+Developer integration overview: `docs/OPENCLAW_SKILL.md`
 
 ## Requirements
 
@@ -97,6 +98,7 @@ roborock-cli adb-setup --log-file roborock_log.txt --email you@example.com
 JSON output mode:
 
 ```bash
+roborock-cli --json health
 roborock-cli --json status
 roborock-cli --json rooms
 roborock-cli --json clean Kitchen
@@ -130,6 +132,7 @@ Camera guide: `docs/CAMERA.md`
 | --- | --- |
 | `setup` | Interactive setup via email verification |
 | `adb-setup` | Build config from Android ADB extraction |
+| `health` | Preflight check for version/config/devices |
 | `devices` | List configured devices |
 | `rooms` | Discover and cache room segment mapping |
 | `clean <rooms...>` | Clean one or more rooms by name |
@@ -176,7 +179,8 @@ This repo is configured to ignore common sensitive artifacts:
 
 ## Documentation
 
-- `docs/OPENCLAW_SKILL.md` - using this project as an OpenClaw skill backend
+- `SKILL.md` - OpenClaw agent instruction file (machine-facing)
+- `docs/OPENCLAW_SKILL.md` - integration overview for developers (human-facing)
 - `docs/ADB_EXTRACTION.md` - Android ADB extraction flow
 - `docs/CAMERA.md` - camera usage and limitations
 - `docs/PROTOCOL.md` - protocol and architecture notes

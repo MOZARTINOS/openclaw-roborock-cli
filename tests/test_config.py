@@ -37,3 +37,24 @@ def test_save_and_load_roundtrip(tmp_path: Path) -> None:
 
     assert saved == path
     assert loaded == data
+
+
+def test_load_config_respects_roborock_env(monkeypatch, tmp_path: Path) -> None:
+    path = tmp_path / "env-config.json"
+    path.write_text('{"email":"env@example.com"}', encoding="utf-8")
+    monkeypatch.setenv("ROBOROCK_CONFIG", str(path))
+
+    loaded = load_config()
+    assert loaded["email"] == "env@example.com"
+
+
+def test_save_config_respects_roborock_env(monkeypatch, tmp_path: Path) -> None:
+    path = tmp_path / "save-config.json"
+    monkeypatch.setenv("ROBOROCK_CONFIG", str(path))
+
+    data = {"email": "saved@example.com"}
+    saved = save_config(data)
+    loaded = load_config(path)
+
+    assert saved == path
+    assert loaded == data

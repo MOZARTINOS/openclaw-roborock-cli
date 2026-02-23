@@ -1,5 +1,8 @@
 # OpenClaw Skill Integration
 
+This file is human-facing developer documentation.
+The machine-facing instruction file for agents is `SKILL.md` in the repository root.
+
 This project can be used as an OpenClaw-compatible skill backend.
 
 It exposes a stable command-line interface (`roborock-cli`) that an agent can call as tool actions.

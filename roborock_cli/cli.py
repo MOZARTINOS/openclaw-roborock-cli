@@ -4,6 +4,7 @@
 Usage:
     roborock-cli setup                             Interactive first-time setup
     roborock-cli adb-setup                         Build config from Android ADB extraction
+    roborock-cli health                            Readiness check (version/config/devices)
     roborock-cli devices                           List configured devices
     roborock-cli rooms                             Discover and list cleanable rooms
     roborock-cli clean Kitchen "Living Room"       Clean room(s) by name
@@ -40,16 +41,70 @@ from .config import load_config, save_config
 from .mqtt import send_command
 
 
+class CLIError(Exception):
+    """Structured CLI error used for stable JSON error responses."""
+
+    def __init__(self, code: str, message: str, **extra: Any) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.extra = extra
+
+
 def _print_json(payload: Any) -> None:
     print(json.dumps(payload, indent=2, ensure_ascii=False))
 
 
-def _load_config_or_exit() -> dict[str, Any]:
+def _emit_ok(result: Any | None = None, **extra: Any) -> None:
+    payload: dict[str, Any] = {"ok": True}
+    if result is not None:
+        payload["result"] = result
+    payload.update(extra)
+    _print_json(payload)
+
+
+def _emit_error(code: str, message: str, **extra: Any) -> None:
+    payload: dict[str, Any] = {"ok": False, "error": code, "message": message}
+    payload.update(extra)
+    _print_json(payload)
+
+
+def _classify_error(error: Exception) -> str:
+    """Map exceptions/messages to stable JSON error codes."""
+    message = str(error).lower()
+
+    if isinstance(error, FileNotFoundError):
+        return "config_missing"
+    if "ambiguous room" in message:
+        return "room_ambiguous"
+    if "unknown room" in message or "no rooms matched" in message or "no room mapping available" in message:
+        return "room_not_found"
+    if "device index" in message or "index must" in message or "no configured devices" in message:
+        return "device_not_found"
+    if "offline" in message or "unreachable" in message or "timeout" in message:
+        return "device_offline"
+    if (
+        "auth" in message
+        or "unauthorized" in message
+        or "forbidden" in message
+        or "invalid verification code" in message
+        or "credentials" in message
+        or "login failed" in message
+    ):
+        return "auth_error"
+
+    return "command_failed"
+
+
+def _raise_config_missing(error: FileNotFoundError) -> None:
+    raise CLIError("config_missing", str(error)) from error
+
+
+def _load_config_or_raise() -> dict[str, Any]:
     try:
         return load_config()
     except FileNotFoundError as error:
-        print(f"Error: {error}")
-        raise SystemExit(1) from error
+        _raise_config_missing(error)
 
 
 def get_devices(config: dict[str, Any]) -> list[dict[str, Any]]:
@@ -69,10 +124,10 @@ def print_devices(config: dict[str, Any], json_output: bool = False) -> None:
     """Print configured devices."""
     devices = get_devices(config)
     if not devices:
-        raise RuntimeError("No devices configured. Run 'roborock-cli setup' first.")
+        raise CLIError("device_not_found", "No devices configured. Run 'roborock-cli setup' first.")
 
     if json_output:
-        _print_json(devices)
+        _emit_ok(result=devices, devices=len(devices))
         return
 
     print(f"Configured devices ({len(devices)}):")
@@ -90,8 +145,7 @@ def setup_interactive() -> None:
 
     email = input("Enter your Roborock account email: ").strip()
     if not email:
-        print("Error: email is required")
-        raise SystemExit(1)
+        raise CLIError("command_failed", "Email is required")
 
     print(f"\nDiscovering region for {email}...")
     region = asyncio.run(discover_region(email))
@@ -104,15 +158,13 @@ def setup_interactive() -> None:
 
     code = input("\nEnter verification code: ").strip()
     if not code:
-        print("Error: verification code is required")
-        raise SystemExit(1)
+        raise CLIError("command_failed", "Verification code is required")
 
     print("\nLogging in...")
     try:
         user_data = asyncio.run(login_with_code(email, code, base_url))
     except RuntimeError as error:
-        print(f"Error: {error}")
-        raise SystemExit(1) from error
+        raise CLIError("auth_error", str(error)) from error
     print(f"Logged in as {user_data.get('nickname', email)}")
 
     print("\nFetching devices...")
@@ -121,8 +173,7 @@ def setup_interactive() -> None:
 
     devices = config.get("devices", [])
     if not devices:
-        print("Warning: no devices found. Check your Roborock app.")
-        raise SystemExit(1)
+        raise CLIError("device_not_found", "No devices found. Check your Roborock app.")
 
     print(f"Found {len(devices)} device(s):")
     for index, device in enumerate(devices):
@@ -148,20 +199,47 @@ def setup_interactive() -> None:
     print("\nDone. Try: roborock-cli status")
 
 
+def run_health(args: argparse.Namespace) -> None:
+    """Health preflight command for agents/automation."""
+    try:
+        config = load_config()
+    except FileNotFoundError as error:
+        if args.json_output:
+            _emit_error(
+                "config_missing",
+                str(error),
+                version=__version__,
+                config_exists=False,
+            )
+            return
+        raise CLIError("config_missing", str(error)) from error
+
+    devices = get_devices(config)
+    if args.json_output:
+        _emit_ok(
+            version=__version__,
+            config_exists=True,
+            devices=len(devices),
+        )
+        return
+
+    print(f"Version:       {__version__}")
+    print("Config exists: yes")
+    print(f"Devices:       {len(devices)}")
+
+
 def run_adb_setup(args: argparse.Namespace) -> None:
     """Build configuration using extracted Android ADB login payload."""
     if args.log_file:
         try:
             extracted = extract_payload_from_log(Path(args.log_file))
         except RuntimeError as error:
-            print(f"Error: {error}")
-            raise SystemExit(1) from error
+            raise CLIError("command_failed", str(error)) from error
     else:
         try:
             extracted = load_extracted_payload(Path(args.extracted_json))
         except RuntimeError as error:
-            print(f"Error: {error}")
-            raise SystemExit(1) from error
+            raise CLIError("command_failed", str(error)) from error
 
     if args.output_extracted:
         output_path = save_extracted_payload(extracted, Path(args.output_extracted))
@@ -171,12 +249,10 @@ def run_adb_setup(args: argparse.Namespace) -> None:
     email = args.email
     if not email:
         if args.json_output:
-            print("Error: --email is required when --json is used.")
-            raise SystemExit(1)
+            raise CLIError("command_failed", "--email is required when --json is used.")
         email = input("Enter your Roborock account email: ").strip()
         if not email:
-            print("Error: email is required")
-            raise SystemExit(1)
+            raise CLIError("command_failed", "Email is required")
 
     home_data: dict[str, Any] = {}
     if not args.skip_home_fetch:
@@ -186,23 +262,21 @@ def run_adb_setup(args: argparse.Namespace) -> None:
         try:
             home_data = asyncio.run(get_home_data_from_token(extracted["token"], api_base))
         except Exception as error:  # noqa: BLE001 - surface API details directly
-            print(f"Error: failed to fetch home data: {error}")
-            raise SystemExit(1) from error
+            raise CLIError("auth_error", f"Failed to fetch home data: {error}") from error
 
     config = build_config(email, {"rriot": extracted["rriot"]}, home_data)
     config_path = save_config(config, Path(args.config_path).expanduser() if args.config_path else None)
     devices = config.get("devices", [])
 
     if args.json_output:
-        _print_json(
-            {
+        _emit_ok(
+            result={
                 "config_path": str(config_path),
                 "devices_found": len(devices),
                 "email": email,
                 "region": extracted.get("region"),
                 "country": extracted.get("country"),
                 "rruid": extracted.get("rruid"),
-                "token": extracted.get("token"),
             }
         )
         return
@@ -226,23 +300,21 @@ def run_adb_setup(args: argparse.Namespace) -> None:
 
 def run_rooms(args: argparse.Namespace) -> None:
     """Discover and list cleanable rooms."""
-    config = _load_config_or_exit()
-
+    config = _load_config_or_raise()
     from .rooms import discover_rooms, save_room_map
 
     try:
         room_map = asyncio.run(discover_rooms(config, device_index=args.device))
     except Exception as error:  # noqa: BLE001 - show remote/API details
-        print(f"Error: room discovery failed: {error}")
-        raise SystemExit(1) from error
+        raise CLIError(_classify_error(error), f"Room discovery failed: {error}") from error
 
     save_room_map(room_map)
 
     if args.json_output:
-        _print_json(
-            {
+        _emit_ok(
+            result={
                 "count": len(room_map),
-                "rooms": [{"segment_id": sid, "name": name} for sid, name in sorted(room_map.items())],
+                "rooms": [{"segment_id": segment_id, "name": name} for segment_id, name in sorted(room_map.items())],
             }
         )
         return
@@ -263,7 +335,7 @@ def run_rooms(args: argparse.Namespace) -> None:
 
 def run_clean(args: argparse.Namespace) -> None:
     """Clean one or more rooms by human-friendly names."""
-    config = _load_config_or_exit()
+    config = _load_config_or_raise()
     from .rooms import clean_rooms, discover_rooms, load_room_map, resolve_room_names, save_room_map
 
     room_map = load_room_map(config)
@@ -273,33 +345,29 @@ def run_clean(args: argparse.Namespace) -> None:
             if room_map:
                 save_room_map(room_map)
         except Exception as error:  # noqa: BLE001 - show actionable failure
-            print(f"Error: room discovery failed: {error}")
-            print("Run 'roborock-cli rooms' first.")
-            raise SystemExit(1) from error
+            raise CLIError(_classify_error(error), f"Room discovery failed: {error}") from error
 
     if not room_map:
-        print("Error: no room mapping available. Run 'roborock-cli rooms' first.")
-        raise SystemExit(1)
+        raise CLIError("room_not_found", "No room mapping available. Run 'roborock-cli rooms' first.")
 
     try:
         segment_ids = resolve_room_names(room_map, args.rooms)
     except ValueError as error:
-        print(f"Error: {error}")
-        raise SystemExit(1) from error
+        text = str(error)
+        if "Ambiguous room" in text:
+            raise CLIError("room_ambiguous", text) from error
+        raise CLIError("room_not_found", text) from error
 
-    room_names = [room_map[sid] for sid in segment_ids]
+    room_names = [room_map[segment_id] for segment_id in segment_ids]
 
     try:
-        result = asyncio.run(
-            clean_rooms(config, segment_ids, repeat=args.repeat, device_index=args.device)
-        )
+        result = asyncio.run(clean_rooms(config, segment_ids, repeat=args.repeat, device_index=args.device))
     except Exception as error:  # noqa: BLE001 - show device command failure
-        print(f"Error: failed to start room cleaning: {error}")
-        raise SystemExit(1) from error
+        raise CLIError(_classify_error(error), f"Failed to start room cleaning: {error}") from error
 
     if args.json_output:
-        _print_json(
-            {
+        _emit_ok(
+            result={
                 "rooms": room_names,
                 "segment_ids": segment_ids,
                 "repeat": args.repeat,
@@ -320,46 +388,50 @@ def run_bot(args: argparse.Namespace) -> None:
     """Start the Telegram bot process."""
     token = args.token or os.environ.get("TELEGRAM_BOT_TOKEN")
     if not token:
-        print("Error: Telegram bot token is required.")
-        print("Use --token or set TELEGRAM_BOT_TOKEN in the environment.")
-        raise SystemExit(1)
+        raise CLIError(
+            "command_failed",
+            "Telegram bot token is required. Use --token or set TELEGRAM_BOT_TOKEN.",
+        )
 
-    config = _load_config_or_exit()
+    config = _load_config_or_raise()
 
     allowed_users: list[int] | None = None
     if args.users:
         try:
             allowed_users = [int(user_id.strip()) for user_id in args.users.split(",") if user_id.strip()]
         except ValueError as error:
-            print("Error: --users must be a comma-separated list of numeric Telegram user IDs.")
-            raise SystemExit(1) from error
+            raise CLIError(
+                "command_failed",
+                "--users must be a comma-separated list of numeric Telegram user IDs.",
+            ) from error
 
         if not allowed_users:
-            print("Error: --users was provided but no valid user IDs were found.")
-            raise SystemExit(1)
+            raise CLIError("command_failed", "--users was provided but no valid user IDs were found.")
 
         print(f"Restricted to Telegram user IDs: {allowed_users}")
 
     try:
         from .telegram_bot import start_bot
     except ModuleNotFoundError as error:
-        print("Error: Telegram dependencies are not installed.")
-        print("Install with: pip install roborock-cloud-cli[telegram]")
-        raise SystemExit(1) from error
+        raise CLIError(
+            "command_failed",
+            "Telegram dependencies are not installed. Install with: pip install roborock-cloud-cli[telegram]",
+        ) from error
 
     start_bot(token, config, allowed_users, camera_password=args.camera_password or "")
 
 
 def run_camera(args: argparse.Namespace) -> None:
     """Run camera commands (snapshot, record, stream)."""
-    config = _load_config_or_exit()
+    config = _load_config_or_raise()
 
     try:
         from .camera import camera_record, camera_snapshot, camera_stream
     except ModuleNotFoundError as error:
-        print("Error: Camera dependencies are not installed.")
-        print("Install with: pip install roborock-cloud-cli[camera]")
-        raise SystemExit(1) from error
+        raise CLIError(
+            "command_failed",
+            "Camera dependencies are not installed. Install with: pip install roborock-cloud-cli[camera]",
+        ) from error
 
     try:
         if args.command == "snapshot":
@@ -373,7 +445,7 @@ def run_camera(args: argparse.Namespace) -> None:
                 )
             )
             if args.json_output:
-                _print_json({"output": path})
+                _emit_ok(result={"output": path, "beta_warning": "camera_commands_are_beta"})
             else:
                 print(f"Saved: {path}")
 
@@ -389,12 +461,19 @@ def run_camera(args: argparse.Namespace) -> None:
                 )
             )
             if args.json_output:
-                _print_json({"output": path, "duration": args.duration})
+                _emit_ok(
+                    result={
+                        "output": path,
+                        "duration": args.duration,
+                        "beta_warning": "camera_commands_are_beta",
+                    }
+                )
             else:
                 print(f"Saved: {path}")
 
         elif args.command == "stream":
             if not args.json_output:
+                print("Camera commands are beta.")
                 print(f"Starting stream on http://{args.host}:{args.port}/")
             asyncio.run(
                 camera_stream(
@@ -408,23 +487,22 @@ def run_camera(args: argparse.Namespace) -> None:
             )
 
     except RuntimeError as error:
-        print(f"Error: {error}")
-        raise SystemExit(1) from error
+        raise CLIError(_classify_error(error), str(error)) from error
     except KeyboardInterrupt:
         print("\nStopped")
 
 
 def run_command(args: argparse.Namespace) -> None:
     """Execute non-room command flows."""
-    config = _load_config_or_exit()
+    if args.command == "health":
+        run_health(args)
+        return
+
+    config = _load_config_or_raise()
     command_name = args.command
 
     if command_name == "devices":
-        try:
-            print_devices(config, json_output=args.json_output)
-        except RuntimeError as error:
-            print(f"Error: {error}")
-            raise SystemExit(1) from error
+        print_devices(config, json_output=args.json_output)
         return
 
     if command_name == "raw":
@@ -433,17 +511,17 @@ def run_command(args: argparse.Namespace) -> None:
             try:
                 params = json.loads(args.params)
             except json.JSONDecodeError as error:
-                print(f"Error: invalid JSON params: {error.msg} (pos {error.pos})")
-                raise SystemExit(1) from error
+                raise CLIError("command_failed", f"Invalid JSON params: {error.msg} (pos {error.pos})") from error
         else:
             params = None
 
-        result = asyncio.run(send_command(config, method, params=params, device_index=args.device))
+        try:
+            result = asyncio.run(send_command(config, method, params=params, device_index=args.device))
+        except Exception as error:  # noqa: BLE001 - classify connection/auth/device failures
+            raise CLIError(_classify_error(error), f"Command failed: {error}") from error
+
         if args.json_output:
-            if isinstance(result, (dict, list)):
-                _print_json(result)
-            else:
-                _print_json({"result": result})
+            _emit_ok(result=result)
             return
 
         if isinstance(result, (dict, list)):
@@ -453,9 +531,7 @@ def run_command(args: argparse.Namespace) -> None:
         return
 
     if command_name not in COMMANDS:
-        print(f"Error: unknown command: {command_name}")
-        print(f"Available: {', '.join(COMMANDS.keys())}")
-        raise SystemExit(1)
+        raise CLIError("command_failed", f"Unknown command: {command_name}")
 
     method, params, description = COMMANDS[command_name]
     if not args.json_output:
@@ -464,14 +540,10 @@ def run_command(args: argparse.Namespace) -> None:
     try:
         result = asyncio.run(send_command(config, method, params=params, device_index=args.device))
     except Exception as error:  # noqa: BLE001 - keep remote/API errors visible
-        print(f"Error: command failed: {error}")
-        raise SystemExit(1) from error
+        raise CLIError(_classify_error(error), f"Command failed: {error}") from error
 
     if args.json_output:
-        if isinstance(result, (dict, list)):
-            _print_json(result)
-        else:
-            _print_json({"result": result})
+        _emit_ok(result=result)
         return
 
     if command_name == "status":
@@ -502,6 +574,7 @@ def main() -> None:
     subparsers = parser.add_subparsers(dest="command")
 
     subparsers.add_parser("setup", help="Interactive first-time setup")
+    subparsers.add_parser("health", help="Health preflight check")
 
     adb_setup_parser = subparsers.add_parser(
         "adb-setup",
@@ -583,20 +656,33 @@ def main() -> None:
         parser.print_help()
         raise SystemExit(1)
 
-    if args.command == "setup":
-        setup_interactive()
-    elif args.command == "adb-setup":
-        run_adb_setup(args)
-    elif args.command == "rooms":
-        run_rooms(args)
-    elif args.command == "clean":
-        run_clean(args)
-    elif args.command == "bot":
-        run_bot(args)
-    elif args.command in ("snapshot", "record", "stream"):
-        run_camera(args)
-    else:
-        run_command(args)
+    try:
+        if args.command == "setup":
+            setup_interactive()
+        elif args.command == "adb-setup":
+            run_adb_setup(args)
+        elif args.command == "rooms":
+            run_rooms(args)
+        elif args.command == "clean":
+            run_clean(args)
+        elif args.command == "bot":
+            run_bot(args)
+        elif args.command in ("snapshot", "record", "stream"):
+            run_camera(args)
+        else:
+            run_command(args)
+    except CLIError as error:
+        if args.json_output:
+            _emit_error(error.code, error.message, **error.extra)
+        else:
+            print(f"Error: {error.message}")
+        raise SystemExit(1) from error
+    except Exception as error:  # noqa: BLE001 - final safety net
+        if args.json_output:
+            _emit_error("command_failed", str(error))
+        else:
+            print(f"Error: {error}")
+        raise SystemExit(1) from error
 
 
 if __name__ == "__main__":
