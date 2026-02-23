@@ -1,8 +1,8 @@
-"""Available Roborock commands."""
+"""Available Roborock commands and room management."""
 
 from roborock.roborock_typing import RoborockCommand
 
-# Command name -> (RoborockCommand, params)
+# Command name -> (RoborockCommand, params, description)
 COMMANDS = {
     # Basic control
     "start": (RoborockCommand.APP_START, None, "Start cleaning"),
@@ -21,6 +21,10 @@ COMMANDS = {
     "fan_balanced": (RoborockCommand.SET_CUSTOM_MODE, [102], "Set fan to balanced"),
     "fan_turbo": (RoborockCommand.SET_CUSTOM_MODE, [103], "Set fan to turbo"),
     "fan_max": (RoborockCommand.SET_CUSTOM_MODE, [104], "Set fan to max"),
+
+    # Map / rooms
+    "maps": ("get_multi_maps_list", None, "List saved maps"),
+    "rooms": ("get_room_mapping", None, "Get room segment IDs"),
 }
 
 # Human-readable status state mapping

@@ -81,6 +81,15 @@ Messages are encrypted with the device's `local_key` using AES-128-ECB.
 | `find_me` | `[]` | Make robot beep |
 | `set_custom_mode` | `[101-104]` | Set fan speed |
 
+### Room Cleaning
+
+| Command | Params | Description |
+|---------|--------|-------------|
+| `app_segment_clean` | `[16, 17]` | Clean specific room segments |
+| `app_segment_clean` | `[{"segments": [16], "repeat": 2}]` | Multi-pass room cleaning |
+| `get_room_mapping` | `[]` | Get segment_id → cloud_room_id map |
+| `get_multi_maps_list` | `[]` | List saved maps |
+
 ### Status & Info
 
 | Command | Description |
@@ -111,6 +120,73 @@ Messages are encrypted with the device's `local_key` using AES-128-ECB.
 | 10 | Paused |
 | 17 | Zoned cleaning |
 | 18 | Segment cleaning |
+
+## Room Discovery
+
+Room-specific cleaning requires mapping between three data sources:
+
+### 1. Cloud Room Names (via REST API)
+
+The Roborock cloud stores room names set in the app. Fetch via Hawk-authenticated API:
+
+```
+GET https://api-eu.roborock.com/user/homes/{home_id}
+Authorization: Hawk id="{u}",s="{s}",ts="{ts}",nonce="{nonce}",mac="{mac}"
+```
+
+Response includes:
+```json
+{
+  "rooms": [
+    {"id": 40680870, "name": "Kitchen"},
+    {"id": 40680878, "name": "Kids Room"}
+  ]
+}
+```
+
+### 2. Device Room Mapping (via MQTT)
+
+The device maps segment IDs to cloud room IDs:
+
+```json
+// get_room_mapping response
+[
+  [16, "40680870", 14],   // segment 16 → cloud room 40680870
+  [17, "40680878", 12],   // segment 17 → cloud room 40680878
+]
+```
+
+### 3. Final Mapping
+
+Combine both: `segment_id → cloud_id → room_name`
+
+```
+Segment 16 → Cloud 40680870 → "Kitchen"
+Segment 17 → Cloud 40680878 → "Kids Room"
+```
+
+Then use `app_segment_clean` with segment IDs to clean specific rooms.
+
+### Hawk Authentication
+
+Cloud API endpoints that return home/device data use Hawk authentication:
+
+```python
+import base64, hashlib, hmac, math, secrets, time
+
+timestamp = math.floor(time.time())
+nonce = secrets.token_urlsafe(6)
+prestr = ":".join([
+    rriot_u, rriot_s, nonce, str(timestamp),
+    hashlib.md5(url_path.encode()).hexdigest(),
+    "",  # params
+    "",  # formdata
+])
+mac = base64.b64encode(
+    hmac.new(rriot_h.encode(), prestr.encode(), hashlib.sha256).digest()
+).decode()
+header = f'Hawk id="{rriot_u}",s="{rriot_s}",ts="{timestamp}",nonce="{nonce}",mac="{mac}"'
+```
 
 ## Security Notes
 

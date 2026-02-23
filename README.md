@@ -18,9 +18,9 @@ $ roborock-cli status
   Water tank: Installed
   Mop:        Attached
 
-$ roborock-cli start
-📡 Start cleaning...
-✅ OK
+$ roborock-cli clean Kitchen
+🧹 Cleaning: Kitchen
+✅ Started!
 ```
 
 ## ✨ Features
@@ -28,9 +28,11 @@ $ roborock-cli start
 - 🔌 **No app required** — works entirely from the terminal
 - 🔐 **Secure setup** — email verification, credentials stored locally with `600` permissions
 - 🧹 **Full control** — start, stop, pause, dock, find, fan speed
+- 🏠 **Room cleaning** — clean specific rooms by name with auto-discovery
 - 📊 **Status monitoring** — battery, state, clean area, consumables
 - 🏠 **Multi-device** — supports multiple vacuums on one account
 - 🔧 **Raw commands** — send any Roborock command directly
+- 📱 **Telegram bot** — inline control panel with room buttons
 - 📸 **Camera** — snapshot, record, MJPEG livestream (camera models)
 - 📱 **ADB fallback** — extract credentials via Android Debug Bridge if needed
 
@@ -60,12 +62,13 @@ This will:
 1. Ask for your Roborock account email
 2. Send a verification code
 3. Log in and discover your devices
-4. Save credentials to `~/.config/roborock-cli/config.json`
+4. **Auto-discover rooms** and map segment IDs
+5. Save credentials to `~/.config/roborock-cli/config.json`
 
 ### Use
 
 ```bash
-roborock-cli start          # Start cleaning
+roborock-cli start          # Start cleaning all rooms
 roborock-cli stop           # Stop
 roborock-cli dock           # Return to dock
 roborock-cli find           # Make it beep
@@ -73,13 +76,48 @@ roborock-cli status         # Check status
 roborock-cli fan_turbo      # Set fan speed
 ```
 
+## 🏠 Room Cleaning
+
+Clean specific rooms by name — no need to remember segment IDs:
+
+```bash
+# Discover rooms (auto-runs during setup)
+roborock-cli rooms
+  🏠 7 rooms found:
+
+    ID  Room Name
+    ──  ────────────────────
+    16  Kitchen
+    17  Kids Room
+    18  Dining Room
+    19  Living Room
+    20  Bedroom
+    21  Office
+    22  Hallway
+
+# Clean a single room
+roborock-cli clean Kitchen
+
+# Clean multiple rooms
+roborock-cli clean Kitchen "Living Room" Bedroom
+
+# Double pass for deep cleaning
+roborock-cli clean Kitchen --repeat 2
+
+# Partial name matching works
+roborock-cli clean kit       # matches "Kitchen"
+roborock-cli clean bed       # matches "Bedroom"
+```
+
+Room names are fetched from the Roborock cloud — whatever you named them in the app.
+
 ## 📋 All Commands
 
 | Command | Description |
 |---------|-------------|
 | `setup` | Interactive first-time setup |
 | `status` | Get current status (battery, state, area) |
-| `start` | Start cleaning |
+| `start` | Start cleaning all rooms |
 | `stop` | Stop cleaning |
 | `pause` | Pause cleaning |
 | `dock` | Return to charging dock |
@@ -88,6 +126,8 @@ roborock-cli fan_turbo      # Set fan speed
 | `fan_balanced` | Set fan to balanced mode |
 | `fan_turbo` | Set fan to turbo mode |
 | `fan_max` | Set fan to max mode |
+| `rooms` | Discover and list room segments |
+| `clean <rooms...>` | Clean specific room(s) by name |
 | `consumables` | Show consumable wear status |
 | `clean_summary` | Show cleaning history |
 | `raw <method> [json]` | Send any raw command |
@@ -108,11 +148,12 @@ Send any supported Roborock command:
 ```bash
 roborock-cli raw get_network_info
 roborock-cli raw set_custom_mode '[102]'
+roborock-cli raw get_room_mapping
 ```
 
 ## 🤖 Telegram Bot
 
-Control your vacuum with inline buttons directly in Telegram!
+Control your vacuum with inline buttons directly in Telegram — including room-specific cleaning!
 
 ### Setup
 
@@ -143,17 +184,28 @@ roborock-cli bot
 
 ### Control Panel
 
-Send `/panel` to your bot to get an interactive control panel:
+Send `/panel` to your bot to get an interactive control panel with room buttons:
 
 ```
-🤖 Roborock S8 | 🔋 92% | 💤 Idle | 💨 Max
+🤖 Roborock S8
 
-[▶️ Start]  [⏸ Pause]  [⏹ Stop]
-[🏠 Dock]   [📍 Find]  [🔄 Status]
-[🔇 Quiet]  [⚖️ Balanced] [💨 Turbo]
+⚡ Charging  ·  🔋 78%  ·  ⚖️ Balanced
+
+[▶️ Start]    [⏸ Pause]     [⏹ Stop]
+[🏠 Dock]     [📍 Find]     [📊 Status]
+[🔇 Quiet]    [⚖️ Balanced]  [💨 Turbo]
+           ── Rooms ──
+[🍳 Kitchen]  [🍽 Dining]    [🛋 Living Room]
+[🧒 Kids Room][🛏 Bedroom]   [💻 Office]
+[🚪 Hallway]  [🏠 All Rooms]
 ```
 
-The panel auto-updates after each action — battery, state, and fan speed refresh in real-time.
+The panel auto-updates after each action. Tap a room to clean just that room!
+
+Bot commands:
+- `/panel` — Show control panel with buttons
+- `/status` — Detailed text status
+- `/rooms` — Refresh room list
 
 ## 📸 Camera Livestream (Beta)
 
@@ -177,7 +229,7 @@ Works with **VLC, OBS, Home Assistant, Frigate**, or any MJPEG-compatible viewer
 
 👉 See [docs/CAMERA.md](docs/CAMERA.md) for full guide, supported models, and streaming setup.
 
-> ⚠️ **Beta**: Camera support is based on reverse-engineered protocol documentation. 
+> ⚠️ **Beta**: Camera support is based on reverse-engineered protocol documentation.
 > Tested on Qrevo Curv. Please report compatibility with other models!
 
 ## 🔐 Security
@@ -198,9 +250,10 @@ If the email code flow doesn't work (2FA issues, rate limiting), you can extract
 ## 🏗 How It Works
 
 1. **Authentication**: Login via Roborock cloud API → receive `rriot` credentials
-2. **MQTT**: Connect to Roborock's MQTT broker using derived credentials
-3. **Commands**: Publish encrypted commands → receive encrypted responses
-4. **Protocol**: Uses the V1 protocol from [python-roborock](https://github.com/Python-roborock/python-roborock)
+2. **Room discovery**: Fetch room names from cloud + segment IDs from device → auto-map
+3. **MQTT**: Connect to Roborock's MQTT broker using derived credentials
+4. **Commands**: Publish encrypted commands → receive encrypted responses
+5. **Protocol**: Uses the V1 protocol from [python-roborock](https://github.com/Python-roborock/python-roborock)
 
 👉 See [docs/PROTOCOL.md](docs/PROTOCOL.md) for technical details.
 

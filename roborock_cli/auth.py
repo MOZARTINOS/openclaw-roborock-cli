@@ -1,9 +1,13 @@
 """Authentication flow for Roborock Cloud API."""
 
 import asyncio
+import base64
 import hashlib
+import hmac
 import json
+import math
 import secrets
+import time
 
 import aiohttp
 
@@ -82,28 +86,91 @@ async def login_with_code(email: str, code: str, base_url: str) -> dict:
         return data["data"]
 
 
+def _hawk_auth(rriot: dict, url_path: str) -> str:
+    """Generate Hawk authentication header for Roborock API."""
+    timestamp = math.floor(time.time())
+    nonce = secrets.token_urlsafe(6)
+    prestr = ":".join([
+        rriot["u"], rriot["s"], nonce, str(timestamp),
+        hashlib.md5(url_path.encode()).hexdigest(),
+        "",  # params
+        "",  # formdata
+    ])
+    mac = base64.b64encode(
+        hmac.new(rriot["h"].encode(), prestr.encode(), hashlib.sha256).digest()
+    ).decode()
+    return f'Hawk id="{rriot["u"]}",s="{rriot["s"]}",ts="{timestamp}",nonce="{nonce}",mac="{mac}"'
+
+
+async def get_home_id(user_data: dict) -> int:
+    """Get the Roborock home ID from the cloud."""
+    token = user_data["token"]
+    rriot = user_data["rriot"]
+    header_clientid = hashlib.md5(rriot["u"].encode()).hexdigest()
+
+    # Try the IoT endpoint first (more reliable for getHomeDetail)
+    iot_base = rriot["r"]["a"].replace("api-", "").replace(".roborock.com", "iot.roborock.com")
+    # Fallback list
+    urls_to_try = [
+        f"https://{rriot['r']['r'].lower()}iot.roborock.com",
+        rriot["r"]["a"],
+    ]
+
+    async with aiohttp.ClientSession() as session:
+        for base in urls_to_try:
+            try:
+                resp = await session.get(
+                    f"{base}/api/v1/getHomeDetail",
+                    headers={
+                        "Authorization": token,
+                        "header_clientid": header_clientid,
+                    },
+                )
+                data = await resp.json()
+                if data.get("code") == 200:
+                    return data["data"]["rrHomeId"]
+            except Exception:
+                continue
+
+    raise RuntimeError("Failed to get home ID from any endpoint")
+
+
 async def get_home_data(user_data: dict) -> dict:
     """Fetch home data (devices, rooms) from the cloud API."""
     rriot = user_data["rriot"]
-    base_url = rriot["r"]["a"]
-    token = user_data["token"]
+    api_base = rriot["r"]["a"]
+
+    home_id = await get_home_id(user_data)
+    url_path = f"/user/homes/{home_id}"
+    hawk = _hawk_auth(rriot, url_path)
 
     async with aiohttp.ClientSession() as session:
-        # Get home ID
         resp = await session.get(
-            f"{base_url}/api/v1/getHomeDetail",
-            headers={"Authorization": token},
+            f"{api_base}{url_path}",
+            headers={"Authorization": hawk},
         )
         data = await resp.json()
-        if data.get("code") != 200 and not data.get("success"):
+        if not data.get("success"):
             raise RuntimeError(f"Failed to get home data: {data}")
-        return data.get("data", data.get("result", {}))
+        return data.get("result", {})
+
+
+async def get_room_names(user_data: dict) -> dict[str, str]:
+    """Fetch room name mapping from the cloud: {cloud_id: name}.
+
+    This maps the cloud room IDs to human-readable names set in the Roborock app.
+    Combine with get_room_mapping device command to map segment_id → room name.
+    """
+    home_data = await get_home_data(user_data)
+    rooms = home_data.get("rooms", [])
+    return {str(r["id"]): r["name"] for r in rooms}
 
 
 def build_config(email: str, user_data: dict, home_data: dict) -> dict:
     """Build a config dict from login and home data."""
     devices = home_data.get("devices", [])
     products = home_data.get("products", [])
+    rooms = home_data.get("rooms", [])
 
     # Build product lookup
     product_map = {p["id"]: p for p in products}
@@ -112,15 +179,16 @@ def build_config(email: str, user_data: dict, home_data: dict) -> dict:
         "email": email,
         "rriot": user_data["rriot"],
         "devices": [],
+        "rooms": {str(r["id"]): r["name"] for r in rooms},
     }
 
     for dev in devices:
-        product = product_map.get(dev.get("product_id", ""), {})
+        product = product_map.get(dev.get("product_id", dev.get("productId", "")), {})
         config["devices"].append({
             "duid": dev["duid"],
             "name": dev.get("name", "Unknown"),
-            "local_key": dev["local_key"],
-            "product_id": dev.get("product_id", ""),
+            "local_key": dev.get("local_key", dev.get("localKey", "")),
+            "product_id": dev.get("product_id", dev.get("productId", "")),
             "model": product.get("model", "unknown"),
             "online": dev.get("online", False),
         })

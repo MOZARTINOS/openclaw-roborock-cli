@@ -15,6 +15,9 @@ Usage:
     roborock-cli fan_max            Set fan to max mode
     roborock-cli consumables        Show consumable status
     roborock-cli clean_summary      Show cleaning history
+    roborock-cli rooms              Discover and list rooms
+    roborock-cli clean Kitchen      Clean specific room(s)
+    roborock-cli clean Kitchen Bedroom --repeat 2
     roborock-cli raw <method> [params_json]   Send raw command
 """
 
@@ -62,7 +65,7 @@ def setup_interactive():
         sys.exit(1)
     print(f"✅ Logged in as {user_data.get('nickname', email)}")
 
-    print("\n🏠 Fetching devices...")
+    print("\n🏠 Fetching devices and rooms...")
     home_data = asyncio.run(get_home_data(user_data))
     config = build_config(email, user_data, home_data)
 
@@ -76,10 +79,104 @@ def setup_interactive():
         status = "🟢 online" if dev.get("online") else "🔴 offline"
         print(f"   [{i}] {dev['name']} ({dev.get('model', '?')}) — {status}")
 
+    # Show rooms
+    rooms = config.get("rooms", {})
+    if rooms:
+        print(f"\n🏠 Found {len(rooms)} room(s):")
+        for rid, name in rooms.items():
+            print(f"   • {name}")
+
     config_path = save_config(config)
     print(f"\n💾 Config saved to: {config_path}")
     print(f"   (permissions: 600 — only you can read it)")
+
+    # Discover room segments
+    print(f"\n🗺 Discovering room segments...")
+    try:
+        from .rooms import discover_rooms, save_room_map
+        room_map = asyncio.run(discover_rooms(config))
+        save_room_map(room_map, config_path)
+        print(f"✅ Mapped {len(room_map)} room segments:")
+        for sid, name in sorted(room_map.items()):
+            print(f"   [{sid}] {name}")
+    except Exception as e:
+        print(f"⚠️  Room discovery failed: {e}")
+        print("   You can retry later with: roborock-cli rooms")
+
     print(f"\n🎉 Done! Try: roborock-cli status")
+    print(f"   Clean a room: roborock-cli clean Kitchen")
+
+
+def run_rooms(args):
+    """Discover and list room segments."""
+    try:
+        config = load_config()
+    except FileNotFoundError as e:
+        print(f"❌ {e}")
+        sys.exit(1)
+
+    from .rooms import discover_rooms, save_room_map
+
+    print("🗺 Discovering rooms...")
+    try:
+        room_map = asyncio.run(discover_rooms(config, device_index=args.device))
+    except Exception as e:
+        print(f"❌ Room discovery failed: {e}")
+        sys.exit(1)
+
+    save_room_map(room_map)
+
+    print(f"\n🏠 {len(room_map)} rooms found:\n")
+    print(f"  {'ID':>4}  {'Room Name'}")
+    print(f"  {'─' * 4}  {'─' * 20}")
+    for sid, name in sorted(room_map.items()):
+        print(f"  {sid:>4}  {name}")
+
+    print(f"\n💡 Clean a room: roborock-cli clean \"{list(room_map.values())[0]}\"")
+    print(f"   Multiple rooms: roborock-cli clean \"{list(room_map.values())[0]}\" \"{list(room_map.values())[-1]}\"")
+
+
+def run_clean(args):
+    """Clean specific rooms by name."""
+    try:
+        config = load_config()
+    except FileNotFoundError as e:
+        print(f"❌ {e}")
+        sys.exit(1)
+
+    from .rooms import clean_rooms, discover_rooms, load_room_map, resolve_room_names
+
+    # Load cached room map or discover
+    room_map = load_room_map(config)
+    if not room_map:
+        print("🗺 Room segments not cached — discovering...")
+        try:
+            room_map = asyncio.run(discover_rooms(config, device_index=args.device))
+        except Exception as e:
+            print(f"❌ Room discovery failed: {e}")
+            print("   Run 'roborock-cli rooms' first.")
+            sys.exit(1)
+
+    # Resolve names to segment IDs
+    try:
+        segment_ids = resolve_room_names(room_map, args.rooms)
+    except ValueError as e:
+        print(f"❌ {e}")
+        sys.exit(1)
+
+    room_names = [room_map[sid] for sid in segment_ids]
+    repeat_str = f" (×{args.repeat})" if args.repeat > 1 else ""
+    print(f"🧹 Cleaning: {', '.join(room_names)}{repeat_str}")
+
+    try:
+        result = asyncio.run(clean_rooms(config, segment_ids, repeat=args.repeat, device_index=args.device))
+        if result == ["ok"]:
+            print("✅ Started!")
+        else:
+            print(f"Result: {result}")
+    except Exception as e:
+        print(f"❌ Failed: {e}")
+        sys.exit(1)
 
 
 def run_bot(args):
@@ -213,6 +310,15 @@ def main():
     for name, (_, _, desc) in COMMANDS.items():
         subparsers.add_parser(name, help=desc)
 
+    # Room discovery
+    subparsers.add_parser("rooms", help="Discover and list room segments")
+
+    # Room cleaning
+    clean_parser = subparsers.add_parser("clean", help="Clean specific room(s) by name")
+    clean_parser.add_argument("rooms", nargs="+", help="Room name(s) to clean (partial match OK)")
+    clean_parser.add_argument("--repeat", type=int, default=1, choices=[1, 2, 3],
+                              help="Number of cleaning passes (default: 1)")
+
     # Raw command
     raw_parser = subparsers.add_parser("raw", help="Send a raw command")
     raw_parser.add_argument("method", help="Command method name")
@@ -254,6 +360,10 @@ def main():
 
     if args.command == "setup":
         setup_interactive()
+    elif args.command == "rooms":
+        run_rooms(args)
+    elif args.command == "clean":
+        run_clean(args)
     elif args.command == "bot":
         run_bot(args)
     elif args.command in ("snapshot", "record", "stream"):

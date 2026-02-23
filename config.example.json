@@ -12,10 +12,21 @@
       "l": ""
     }
   },
-  "device": {
-    "duid": "",
-    "name": "",
-    "local_key": "",
-    "product_id": ""
+  "devices": [
+    {
+      "duid": "",
+      "name": "Roborock S8",
+      "local_key": "",
+      "product_id": "",
+      "model": "roborock.vacuum.a51"
+    }
+  ],
+  "rooms": {
+    "12345678": "Kitchen",
+    "12345679": "Bedroom"
+  },
+  "room_segments": {
+    "16": "Kitchen",
+    "17": "Bedroom"
   }
 }
