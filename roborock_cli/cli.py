@@ -11,6 +11,7 @@ Usage:
     roborock-cli status                            Get vacuum status
     roborock-cli start|stop|pause|dock|find        Core vacuum commands
     roborock-cli consumables|clean_summary         Maintenance/history commands
+    roborock-cli map [-o map.png]                  Save current map as a PNG image
     roborock-cli raw <method> [params_json]        Send a raw Roborock command
     roborock-cli bot --token <token>               Start Telegram bot (optional extra)
     roborock-cli snapshot|record|stream            Camera commands (optional extra)
@@ -296,6 +297,27 @@ def run_adb_setup(args: argparse.Namespace) -> None:
     else:
         print("  Warning: no devices discovered in home data.")
     print("\nRun: roborock-cli devices")
+
+
+def run_map(args: argparse.Namespace) -> None:
+    """Fetch the current map and save it as a PNG image."""
+    config = _load_config_or_raise()
+    from .map import save_map_image
+
+    output = Path(args.output).expanduser()
+
+    try:
+        saved_path = asyncio.run(save_map_image(config, output=output, device_index=args.device))
+    except RuntimeError as error:
+        raise CLIError(_classify_error(error), str(error)) from error
+    except Exception as error:  # noqa: BLE001
+        raise CLIError(_classify_error(error), f"Map fetch failed: {error}") from error
+
+    if args.json_output:
+        _emit_ok(result={"output": str(saved_path), "size_bytes": saved_path.stat().st_size})
+        return
+
+    print(f"Map saved: {saved_path} ({saved_path.stat().st_size:,} bytes)")
 
 
 def run_rooms(args: argparse.Namespace) -> None:
@@ -611,6 +633,9 @@ def main() -> None:
     subparsers.add_parser("devices", help="List configured devices")
     subparsers.add_parser("rooms", help="Discover and list room segments")
 
+    map_parser = subparsers.add_parser("map", help="Save current map as a PNG image")
+    map_parser.add_argument("-o", "--output", default="map.png", help="Output file path (default: map.png)")
+
     clean_parser = subparsers.add_parser("clean", help="Clean room(s) by name")
     clean_parser.add_argument("rooms", nargs="+", help="Room name(s) to clean (partial match is supported)")
     clean_parser.add_argument("--repeat", type=int, default=1, choices=[1, 2, 3], help="Cleaning passes (1-3)")
@@ -663,6 +688,8 @@ def main() -> None:
             run_adb_setup(args)
         elif args.command == "rooms":
             run_rooms(args)
+        elif args.command == "map":
+            run_map(args)
         elif args.command == "clean":
             run_clean(args)
         elif args.command == "bot":
