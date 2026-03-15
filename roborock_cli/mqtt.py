@@ -10,7 +10,7 @@ from roborock.devices.rpc.v1_channel import RpcChannel, RpcStrategy
 from roborock.devices.transport.mqtt_channel import MqttChannel
 from roborock.mqtt.roborock_session import RoborockMqttSession
 from roborock.protocol import create_mqtt_params
-from roborock.protocols.v1_protocol import RequestMessage, create_security_data, decode_rpc_response
+from roborock.protocols.v1_protocol import RequestMessage, create_map_response_decoder, create_security_data, decode_rpc_response
 from roborock.roborock_message import RoborockMessageProtocol
 from roborock.roborock_typing import RoborockCommand
 from roborock.util import RoborockLoggerAdapter
@@ -101,5 +101,53 @@ async def send_command(
 
         rpc = RpcChannel(lambda: [strategy], log_adapter)
         return await rpc.send_command(command, params=params)
+    finally:
+        await session.close()
+
+
+async def send_map_command(
+    config: dict[str, Any],
+    command: RoborockCommand | str,
+    params: list | dict | None = None,
+    device_index: int = 0,
+) -> bytes:
+    """Connect to MQTT using the map channel, send a command, and return raw map bytes."""
+    rriot = build_rriot(config)
+    device = build_device(_resolve_device(config, device_index))
+
+    mqtt_params = create_mqtt_params(rriot)
+    security_data = create_security_data(rriot)
+    session = RoborockMqttSession(mqtt_params)
+
+    try:
+        await session.start()
+
+        channel = MqttChannel(session, device.duid, device.local_key, rriot, mqtt_params)
+        log_adapter = RoborockLoggerAdapter(duid=device.duid, logger=logger)
+        map_decoder = create_map_response_decoder(security_data)
+
+        def encoder(req: RequestMessage) -> bytes:
+            return req.encode_message(
+                RoborockMessageProtocol.RPC_REQUEST,
+                security_data=security_data,
+            )
+
+        strategy = RpcStrategy(
+            name="mqtt_map",
+            channel=channel,
+            encoder=encoder,
+            decoder=map_decoder,
+            health_manager=channel.health_manager,
+        )
+
+        rpc = RpcChannel(lambda: [strategy], log_adapter)
+        result = await rpc.send_command(command, params=params)
+
+        # MapResponse has a .data attribute containing the raw map bytes
+        if hasattr(result, "data"):
+            return result.data
+        if isinstance(result, bytes):
+            return result
+        raise RuntimeError(f"Unexpected map response: {type(result).__name__}")
     finally:
         await session.close()
