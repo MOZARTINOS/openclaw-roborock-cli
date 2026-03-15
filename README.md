@@ -135,6 +135,7 @@ Camera guide: `docs/CAMERA.md`
 | `health` | Preflight check for version/config/devices |
 | `devices` | List configured devices |
 | `rooms` | Discover and cache room segment mapping |
+| `map [-o output.png]` | Fetch and save the current map as PNG |
 | `clean <rooms...>` | Clean one or more rooms by name |
 | `status` | Get current status |
 | `start` | Start cleaning |
